@@ -37,3 +37,11 @@ listen 是本地监听的地址, remote 是服务器的地址和端口, password
 注意, 如果是 ipv6 的地址, 需要使用 `[]` 包含地址.
 
 别忘记填写端口号.
+
+## 使用方式
+
+参考原作者写的 
+[搭配 Chrome 使用](https://github.com/gwuhaolin/lightsocks/wiki/%E6%90%AD%E9%85%8D-Chrome-%E4%BD%BF%E7%94%A8)
+
+其实运行起来之后, 就相当于获得了一个 socks5 的地址, `socks5h://127.0.0.1:7448`,
+你可以将它用在任何支持 socks5 协议的地方.
