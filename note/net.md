@@ -54,7 +54,7 @@ func (v *Buffers) WriteTo(w io.Writer) (n int64, err error)
 
 ---
 
-**Conn** 是一个通用的面向数据流的网络连接.
+**Conn** 是一个通用的面向数据流(stream-oriented)的网络连接.
 多个 goroutine 可以同时在一个 Conn 上调用方法.
 
 ```go
@@ -249,3 +249,364 @@ DialContext 使用提供的 context 连接到指定的网络的地址上.
 超时是一分钟, 每个地址都会有 15 秒的时间来尝试完成连接.
 
 ---
+
+IPConn 实现了 Conn 和 PacketConn 接口, 用于 IP 网络连接.
+
+```go
+type IPConn struct {
+  // contains filtered or unexported fields
+}
+```
+
+相关的方法和函数.
+
+```go
+// 连接到服务器
+func DialIP(network string, laddr, raddr *IPAddr) (*IPConn, error)
+// 本地监听
+func ListenIP(network string, laddr *IPAddr) (*IPConn, error)
+func (c *IPConn) Close() error
+func (c *IPConn) File() (f *os.File, err error)
+func (c *IPConn) LocalAddr() Addr
+func (c *IPConn) Read(b []byte) (int, error)
+func (c *IPConn) ReadFrom(b []byte) (int, Addr, error)
+func (c *IPConn) ReadFromIP(b []byte) (int, *IPAddr, error)
+func (c *IPConn) ReadMsgIP(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error)
+func (c *IPConn) RemoteAddr() Addr
+func (c *IPConn) SetDeadline(t time.Time) error
+func (c *IPConn) SetReadBuffer(bytes int) error
+func (c *IPConn) SetReadDeadline(t time.Time) error
+func (c *IPConn) SetWriteBuffer(bytes int) error
+func (c *IPConn) SetWriteDeadline(t time.Time) error
+func (c *IPConn) SyscallConn() (syscall.RawConn, error)
+func (c *IPConn) Write(b []byte) (int, error)
+func (c *IPConn) WriteMsgIP(b, oob []byte, addr *IPAddr) (n, oobn int, err error)
+func (c *IPConn) WriteTo(b []byte, addr Addr) (int, error)
+func (c *IPConn) WriteToIP(b []byte, addr *IPAddr) (int, error)
+```
+
+---
+
+IPNet 表示一个 IP 网络.
+
+```go
+type IPNet struct {
+  IP   IP     // network number
+  Mask IPMask // network mask
+}
+```
+
+Interface 表示网络接口名字和索引的映射, 也表示网络接口设备的信息.
+
+```go
+type Interface struct {
+  Index        int          // positive integer that starts at one, zero is never used
+  MTU          int          // maximum transmission unit
+  Name         string       // e.g., "en0", "lo0", "eth0.100"
+  HardwareAddr HardwareAddr // IEEE MAC-48, EUI-48 and EUI-64 form
+  Flags        Flags        // e.g., FlagUp, FlagLoopback, FlagMulticast
+}
+```
+
+---
+
+ListenConfig 包含监听一个地址时的选项.
+
+```go
+type ListenConfig struct {
+  // 如果 Control 不是 nil, 它会在创建网络连接之后, 但在绑定到操作系统之前被调用.
+  //
+  // Network 和 address 参数被传递给 Control 方法的, 不一定是传递给 Listen 的那些.
+  // 举个例子, 传递 "tcp" 给 Listen 会导致 Control 函数接收到 "tcp4" 或 "tcp6".
+  Control func(network, address string, c syscall.RawConn) error
+
+  // KeepAlive 指定这个 listener 用于网络连接的 keep-alive 时间.
+  // 如果是零, keep-alives 会被启动, 如果协议和操作系统也支持的话.
+  // 网络协议或操作系统不支持的话, 会忽略这个字段.
+  // 如果是负数, 禁用 keep-alives
+  KeepAlive time.Duration // Go 1.13
+}
+```
+
+```go
+func (lc *ListenConfig) Listen(ctx context.Context, network, address string) (Listener, error)
+func (lc *ListenConfig) ListenPacket(ctx context.Context, network, address string) (PacketConn, error)
+```
+
+---
+
+**Listener** 是一个通用的面向流式协议(stream-oriented protocols)的网络监听器.
+
+多个 goroutine 可能在一个监听器上同时调用方法.
+
+```go
+type Listener interface {
+  // Accept 等待并返回下一个 listener 的连接.
+  Accept() (Conn, error)
+
+  // Close 关闭 listener.
+  // 任何阻塞的 Accept 操作会被释放且返回错误.
+  Close() error
+
+  // Addr 返回监听器的网络地址.
+  Addr() Addr
+}
+```
+
+```go
+func FileListener(f *os.File) (ln Listener, err error)
+func Listen(network, address string) (Listener, error)
+```
+
+Listen 监听一个本地网络地址.
+
+network 参数必须是 "tcp", "tcp4", "tcp6", "unix" 或 "unixpacket".
+
+---
+
+PacketConn 是一个通用的面向包(packet-oriented)的网络连接.
+
+多个 goroutine 可能在一个 PacketConn 上同时调用方法.
+
+```go
+type PacketConn interface {
+  // ReadFrom reads a packet from the connection,
+  // copying the payload into p. It returns the number of
+  // bytes copied into p and the return address that
+  // was on the packet.
+  // It returns the number of bytes read (0 <= n <= len(p))
+  // and any error encountered. Callers should always process
+  // the n > 0 bytes returned before considering the error err.
+  // ReadFrom can be made to time out and return
+  // an Error with Timeout() == true after a fixed time limit;
+  // see SetDeadline and SetReadDeadline.
+  ReadFrom(p []byte) (n int, addr Addr, err error)
+
+  // WriteTo writes a packet with payload p to addr.
+  // WriteTo can be made to time out and return
+  // an Error with Timeout() == true after a fixed time limit;
+  // see SetDeadline and SetWriteDeadline.
+  // On packet-oriented connections, write timeouts are rare.
+  WriteTo(p []byte, addr Addr) (n int, err error)
+
+  // Close closes the connection.
+  // Any blocked ReadFrom or WriteTo operations will be unblocked and return errors.
+  Close() error
+
+  // LocalAddr returns the local network address.
+  LocalAddr() Addr
+
+  // SetDeadline sets the read and write deadlines associated
+  // with the connection. It is equivalent to calling both
+  // SetReadDeadline and SetWriteDeadline.
+  //
+  // A deadline is an absolute time after which I/O operations
+  // fail with a timeout (see type Error) instead of
+  // blocking. The deadline applies to all future and pending
+  // I/O, not just the immediately following call to ReadFrom or
+  // WriteTo. After a deadline has been exceeded, the connection
+  // can be refreshed by setting a deadline in the future.
+  //
+  // An idle timeout can be implemented by repeatedly extending
+  // the deadline after successful ReadFrom or WriteTo calls.
+  //
+  // A zero value for t means I/O operations will not time out.
+  SetDeadline(t time.Time) error
+
+  // SetReadDeadline sets the deadline for future ReadFrom calls
+  // and any currently-blocked ReadFrom call.
+  // A zero value for t means ReadFrom will not time out.
+  SetReadDeadline(t time.Time) error
+
+  // SetWriteDeadline sets the deadline for future WriteTo calls
+  // and any currently-blocked WriteTo call.
+  // Even if write times out, it may return n > 0, indicating that
+  // some of the data was successfully written.
+  // A zero value for t means WriteTo will not time out.
+  SetWriteDeadline(t time.Time) error
+}
+```
+
+```go
+func FilePacketConn(f *os.File) (c PacketConn, err error)
+func ListenPacket(network, address string) (PacketConn, error)
+```
+
+network 参数必须是 "udp", "udp4", "udp6", "unixgram", 或一个 IP 负载.
+
+---
+
+Resolver 寻找名字和数字. 所有的 nil \*Resolver 等价于 Resolver 的零值.
+
+```go
+type Resolver struct {
+  // PreferGo 控制 Go 内置的 DNS resolver 是否是首选的, 如果它在该系统上可用.
+  // 等价于设置 GODEBUG=netdns=go, 但仅限于这个解析器.
+  PreferGo bool
+
+  // StrictErrors 控制临时错误的行为
+  // (包括超时, socket 错误, 和 SERVFAIL), 当使用 Go 内置的解析器时.
+  // 对于一个由多个子查询组成的查询 (比如 A+AAAA 地址查询, 或者遍历 DNS 搜索列表),
+  // 这个选项制造错误来禁止整个查询, 而不是返回部分结果.
+  // 默认它是不启用的, 因为它可能影响兼容性, 解析器不能正确处理 AAAA 查询.
+  StrictErrors bool // Go 1.9
+
+  // Dial 可选地指定一个替代的 dialer 用于 Go 内置的 DNS 解析器的 TCP 和 UDP 连接.
+  // host 和 address 参数总是一个字面量形式的 IP 地址, 而不是一个主机名,
+  // address 参数的 port 总是一个字面量形式的端口号, 而不是一个服务名字.
+  // 如果 Conn 返回一个 PacketConn, 发送和接收 DNS 信息必须符合
+  // RFC 1035 section 4.2.1, "UDP usage".
+  // 否者, 负载于 Conn 上的 DNS 信息必须符合
+  // RFC 7766 section 5, "Transport Protocol Selection".
+  // 如果是 nil, 默认的 dialer 会被使用.
+  Dial func(ctx context.Context, network, address string) (Conn, error) // Go 1.9
+  // contains filtered or unexported fields
+}
+```
+
+```go
+func (r *Resolver) LookupAddr(ctx context.Context, addr string) (names []string, err error)
+func (r *Resolver) LookupCNAME(ctx context.Context, host string) (cname string, err error)
+func (r *Resolver) LookupHost(ctx context.Context, host string) (addrs []string, err error)
+func (r *Resolver) LookupIPAddr(ctx context.Context, host string) ([]IPAddr, error)
+func (r *Resolver) LookupMX(ctx context.Context, name string) ([]*MX, error)
+func (r *Resolver) LookupNS(ctx context.Context, name string) ([]*NS, error)
+func (r *Resolver) LookupPort(ctx context.Context, network, service string) (port int, err error)
+func (r *Resolver) LookupSRV(ctx context.Context, service, proto, name string) (cname string, addrs []*SRV, err error)
+func (r *Resolver) LookupTXT(ctx context.Context, name string) ([]string, error)
+```
+
+---
+
+TCPConn 在 TCP 网络连接上实现了 Conn 接口.
+
+```go
+type TCPConn struct {
+  //tered or unexported fields
+}
+```
+
+```go
+func DialTCP(network string, laddr, raddr *TCPAddr) (*TCPConn, error)
+func (c *TCPConn) Close() error
+func (c *TCPConn) CloseRead() error
+func (c *TCPConn) CloseWrite() error
+func (c *TCPConn) File() (f *os.File, err error)
+func (c *TCPConn) LocalAddr() Addr
+func (c *TCPConn) Read(b []byte) (int, error)
+func (c *TCPConn) ReadFrom(r io.Reader) (int64, error)
+func (c *TCPConn) RemoteAddr() Addr
+func (c *TCPConn) SetDeadline(t time.Time) error
+func (c *TCPConn) SetKeepAlive(keepalive bool) error
+func (c *TCPConn) SetKeepAlivePeriod(d time.Duration) error
+func (c *TCPConn) SetLinger(sec int) error
+func (c *TCPConn) SetNoDelay(noDelay bool) error
+func (c *TCPConn) SetReadBuffer(bytes int) error
+func (c *TCPConn) SetReadDeadline(t time.Time) error
+func (c *TCPConn) SetWriteBuffer(bytes int) error
+func (c *TCPConn) SetWriteDeadline(t time.Time) error
+func (c *TCPConn) SyscallConn() (syscall.RawConn, error)
+func (c *TCPConn) Write(b []byte) (int, error)
+```
+
+```go
+type TCPListener struct {
+  // contains filtered or unexported fields
+}
+func ListenTCP(network string, laddr *TCPAddr) (*TCPListener, error)
+func (l *TCPListener) Accept() (Conn, error)
+func (l *TCPListener) AcceptTCP() (*TCPConn, error)
+func (l *TCPListener) Addr() Addr
+func (l *TCPListener) Close() error
+func (l *TCPListener) File() (f *os.File, err error)
+func (l *TCPListener) SetDeadline(t time.Time) error
+func (l *TCPListener) SyscallConn() (syscall.RawConn, error)
+```
+
+---
+
+UDPConn 在 UDP 网络连接上实现了 Conn 和 PacketConn 接口.
+
+```go
+type UDPConn struct {
+  // contains filtered or unexported fields
+}
+```
+
+```go
+func DialUDP(network string, laddr, raddr *UDPAddr) (*UDPConn, error)
+func ListenMulticastUDP(network string, ifi *Interface, gaddr *UDPAddr) (*UDPConn, error)
+func ListenUDP(network string, laddr *UDPAddr) (*UDPConn, error)
+func (c *UDPConn) Close() error
+func (c *UDPConn) File() (f *os.File, err error)
+func (c *UDPConn) LocalAddr() Addr
+func (c *UDPConn) Read(b []byte) (int, error)
+func (c *UDPConn) ReadFrom(b []byte) (int, Addr, error)
+func (c *UDPConn) ReadFromUDP(b []byte) (int, *UDPAddr, error)
+func (c *UDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *UDPAddr, err error)
+func (c *UDPConn) RemoteAddr() Addr
+func (c *UDPConn) SetDeadline(t time.Time) error
+func (c *UDPConn) SetReadBuffer(bytes int) error
+func (c *UDPConn) SetReadDeadline(t time.Time) error
+func (c *UDPConn) SetWriteBuffer(bytes int) error
+func (c *UDPConn) SetWriteDeadline(t time.Time) error
+func (c *UDPConn) SyscallConn() (syscall.RawConn, error)
+func (c *UDPConn) Write(b []byte) (int, error)
+func (c *UDPConn) WriteMsgUDP(b, oob []byte, addr *UDPAddr) (n, oobn int, err error)
+func (c *UDPConn) WriteTo(b []byte, addr Addr) (int, error)
+func (c *UDPConn) WriteToUDP(b []byte, addr *UDPAddr) (int, error)
+```
+
+---
+
+UnixConn 实现了 Conn 接口, 用于连接到 Unix domain sockets.
+
+```go
+type UnixConn struct {
+  // contains filtered or unexported fields
+}
+```
+
+```go
+func DialUnix(network string, laddr, raddr *UnixAddr) (*UnixConn, error)
+func ListenUnixgram(network string, laddr *UnixAddr) (*UnixConn, error)
+func (c *UnixConn) Close() error
+func (c *UnixConn) CloseRead() error
+func (c *UnixConn) CloseWrite() error
+func (c *UnixConn) File() (f *os.File, err error)
+func (c *UnixConn) LocalAddr() Addr
+func (c *UnixConn) Read(b []byte) (int, error)
+func (c *UnixConn) ReadFrom(b []byte) (int, Addr, error)
+func (c *UnixConn) ReadFromUnix(b []byte) (int, *UnixAddr, error)
+func (c *UnixConn) ReadMsgUnix(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error)
+func (c *UnixConn) RemoteAddr() Addr
+func (c *UnixConn) SetDeadline(t time.Time) error
+func (c *UnixConn) SetReadBuffer(bytes int) error
+func (c *UnixConn) SetReadDeadline(t time.Time) error
+func (c *UnixConn) SetReadDeadline(t time.Time) error
+func (c *UnixConn) SetWriteDeadline(t time.Time) error
+func (c *UnixConn) SyscallConn() (syscall.RawConn, error)
+func (c *UnixConn) Write(b []byte) (int, error)
+func (c *UnixConn) WriteMsgUnix(b, oob []byte, addr *UnixAddr) (n, oobn int, err error)
+func (c *UnixConn) WriteTo(b []byte, addr Addr) (int, error)
+func (c *UnixConn) WriteToUnix(b []byte, addr *UnixAddr) (int, error)
+```
+
+---
+
+UnixListener
+
+```go
+type UnixListener struct {
+  // contains filtered or unexported fields
+}
+func ListenUnix(network string, laddr *UnixAddr) (*UnixListener, error)
+func (l *UnixListener) Accept() (Conn, error)
+func (l *UnixListener) AcceptUnix() (*UnixConn, error)
+func (l *UnixListener) Addr() Addr
+func (l *UnixListener) Close() error
+func (l *UnixListener) File() (f *os.File, err error)
+func (l *UnixListener) SetDeadline(t time.Time) error
+func (l *UnixListener) SetUnlinkOnClose(unlink bool)
+func (l *UnixListener) SyscallConn() (syscall.RawConn, error)
+```
